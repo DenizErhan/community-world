@@ -1,5 +1,8 @@
 extends RefCounted
 ## Loads generated SVG art (assets/) and rasterizes it at runtime.
+## The SVG files carry a hand-written .import with importer="keep": Godot ships them as-is, so
+## FileAccess can read the raw text in exported builds too. Without it the web export only
+## contains a compiled texture and FileAccess finds nothing (this once left the web build blank).
 ## Rasterizing at a fixed supersample (grid.raster_scale in design/tokens.json) keeps
 ## sprites crisp at the maximum zoom while mipmaps keep them smooth when zoomed out.
 

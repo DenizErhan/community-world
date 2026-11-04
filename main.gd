@@ -8,6 +8,8 @@ extends Node2D
 const SAVE_PATH := "user://kayit.json"
 const DATA_PATH := "res://data/buildings.json"
 const TAP_SLOP := 14.0
+const PAN_SPEED := 0.8     # drag pans the camera at 80% of finger speed (feels calmer)
+const START_ZOOM := 0.4    # whole island fits a 720 px wide screen
 const ZOOM_MIN := 0.3
 const ZOOM_MAX := 1.6
 const REMOVE := "_remove"
@@ -78,7 +80,7 @@ func _ready() -> void:
 	cam = Camera2D.new()
 	add_child(cam)
 	cam.position = _tile_center(grid_w * 0.5 - 0.5, grid_h * 0.5 - 0.5) + Vector2(0, 60)
-	cam.zoom = Vector2(0.5, 0.5)
+	cam.zoom = Vector2(START_ZOOM, START_ZOOM)
 	cam.make_current()
 	_build_hud()
 	_recalc()
@@ -411,7 +413,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if dragging and touches.size() < 2:
 			drag_moved += mm.relative.length()
 			if drag_moved >= TAP_SLOP:
-				cam.position -= mm.relative / cam.zoom.x
+				cam.position -= mm.relative * PAN_SPEED / cam.zoom.x
 				_clamp_cam()
 
 
