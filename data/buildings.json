@@ -1,0 +1,65 @@
+{
+  "format": 1,
+  "theme": "history",
+  "age": "stone",
+  "grid": {
+    "w": 14,
+    "h": 14
+  },
+  "base_capacity": 50,
+  "max_offline_hours": 8,
+  "start": {
+    "food": 10,
+    "water": 10,
+    "stone": 30
+  },
+  "resources": {
+    "food": {},
+    "water": {},
+    "stone": {}
+  },
+  "buildings": [
+    {
+      "id": "hut",
+      "requires": "",
+      "cost": {
+        "stone": 10
+      },
+      "produces": {},
+      "capacity": 25
+    },
+    {
+      "id": "farm",
+      "requires": "hut",
+      "cost": {
+        "stone": 15
+      },
+      "produces": {
+        "food": 0.4
+      },
+      "capacity": 0
+    },
+    {
+      "id": "well",
+      "requires": "hut",
+      "cost": {
+        "stone": 10
+      },
+      "produces": {
+        "water": 0.4
+      },
+      "capacity": 0
+    },
+    {
+      "id": "quarry",
+      "requires": "hut",
+      "cost": {
+        "stone": 12
+      },
+      "produces": {
+        "stone": 0.5
+      },
+      "capacity": 0
+    }
+  ]
+}

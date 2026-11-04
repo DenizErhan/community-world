@@ -1,0 +1,39 @@
+{
+  "res.food.name": "Food",
+  "res.water.name": "Water",
+  "res.stone.name": "Stone",
+
+  "building.hut.name": "Stone Hut",
+  "building.hut.short": "Hut",
+  "building.farm.name": "Farm",
+  "building.farm.short": "Farm",
+  "building.well.name": "Well",
+  "building.well.short": "Well",
+  "building.quarry.name": "Quarry",
+  "building.quarry.short": "Quarry",
+
+  "ui.reset": "Reset",
+  "ui.reset_confirm": "Sure?",
+  "ui.remove": "Remove",
+  "ui.remove_sub": "50% refund",
+  "ui.res_line": "{name} {cur}/{cap}",
+  "ui.rate": "+{rate}/s",
+  "ui.no_rate": "-",
+  "ui.cost_part": "{n} {res}",
+  "ui.cost_join": " + ",
+
+  "info.produces": "+{rate} {res}/s",
+  "info.storage": "storage +{n}",
+  "info.line": "{name}: {details}",
+  "info.join": ", ",
+
+  "toast.welcome": "Welcome! Build a Stone Hut first.",
+  "toast.occupied": "That tile is taken.",
+  "toast.need_building": "Build a {name} first.",
+  "toast.not_enough": "Not enough {res}.",
+  "toast.built": "{name} built.",
+  "toast.removed": "{name} removed (50% refund).",
+  "toast.reset_done": "Village reset.",
+  "toast.offline": "While you were away: {gains}",
+  "toast.offline_part": "+{n} {res}"
+}
