@@ -460,26 +460,27 @@ func _ensure_ghost_visible() -> void:
 
 
 ## The tile a tap means. With a ghost out, that is the ground tile under the finger. Otherwise a tap
-## on a building's visible body counts even when the body stands over the tile behind it; the
-## front-most building wins.
+## on a building's visible body counts even when the body stands over the tile behind it. When hit
+## boxes overlap (neighbours, zoomed far out) the building whose body is nearest the finger wins.
 func _pick_tile(w: Vector2) -> Vector2i:
 	var ground := _world_to_tile(w)
 	if pending_id != "":
 		return ground
-	var best := ground
-	var best_depth := -1
-	if buildings.has(ground):
-		best_depth = ground.x + ground.y
+	var place: Dictionary = tok["ui"]["placement"]
 	# The hit box is never smaller than a fingertip on screen, however far the map is zoomed out.
-	var rise: float = maxf(float(tok["ui"]["placement"]["pick_height"]), float(tok["ui"]["placement"]["pick_min_px"]) / cam.zoom.y)
-	var half_w: float = maxf(TW * 0.4, float(tok["ui"]["placement"]["pick_min_px"]) * 0.6 / cam.zoom.x)
+	var rise: float = maxf(float(place["pick_height"]), float(place["pick_min_px"]) / cam.zoom.y)
+	var half_w: float = maxf(TW * 0.4, float(place["pick_min_px"]) * 0.6 / cam.zoom.x)
+	var body := Vector2(0, -float(place["pick_height"]) * 0.4)   # about the middle of a building
+	var best := ground
+	var best_d := INF
 	for t in buildings:
 		var c := _tile_center(t.x, t.y)
-		if absf(w.x - c.x) <= half_w and w.y <= c.y + TH * 0.25 and w.y >= c.y - rise:
-			var depth: int = t.x + t.y
-			if depth > best_depth:
+		var inside := absf(w.x - c.x) <= half_w and w.y <= c.y + TH * 0.25 and w.y >= c.y - rise
+		if inside or t == ground:
+			var d := w.distance_to(c + body)
+			if d < best_d:
 				best = t
-				best_depth = depth
+				best_d = d
 	return best
 
 

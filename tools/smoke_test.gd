@@ -94,10 +94,17 @@ func _initialize() -> void:
 
 	print("Tapping a building")
 	var hut_c: Vector2 = main._tile_center(6, 6)
+	for z in [main.START_ZOOM, 1.0, main.ZOOM_MAX]:
+		main.cam.zoom = Vector2(z, z)
+		var tag := "zoom %.1f: " % z
+		# the quarry stands on the next tile (7, 6); both hit boxes overlap when zoomed out
+		check(main._pick_tile(hut_c + Vector2(0, -30)) == Vector2i(6, 6), tag + "a tap on the hut's body picks the hut, not a neighbour")
+		check(main._pick_tile(main._tile_center(7, 6) + Vector2(0, -20)) == Vector2i(7, 6), tag + "a tap on the quarry's body picks the quarry")
+		check(main._pick_tile(hut_c + Vector2(0, -400)) != Vector2i(6, 6), tag + "a tap far above the roof does not pick the hut")
+	main.cam.zoom = Vector2(main.START_ZOOM, main.START_ZOOM)
 	check(main._world_to_tile(hut_c + Vector2(0, -45)) != Vector2i(6, 6), "(the roof is drawn over a different ground tile)")
-	check(main._pick_tile(hut_c + Vector2(0, -45)) == Vector2i(6, 6), "a tap on the hut's body picks the hut, not the tile behind it")
-	check(main._pick_tile(hut_c + Vector2(300, 0)) == main._world_to_tile(hut_c + Vector2(300, 0)), "a tap on open ground picks that ground tile")
-	check(main._pick_tile(hut_c + Vector2(0, -260)) != Vector2i(6, 6), "a tap well above the roof does not pick the hut")
+	check(main._pick_tile(hut_c + Vector2(0, -45)) == Vector2i(6, 6), "a tap on the roof picks the hut even though the ground tile under it is another")
+	check(main._pick_tile(hut_c + Vector2(500, 0)) == main._world_to_tile(hut_c + Vector2(500, 0)), "a tap on open ground picks that ground tile")
 
 	print("Moving a building")
 	var stone_before_move: float = main.stock["stone"]
