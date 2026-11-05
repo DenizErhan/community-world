@@ -366,7 +366,7 @@ func _on_remove_pressed() -> void:
 	var red := _ucol("button_cancel")
 	btn_remove.add_theme_stylebox_override("normal", _button_style(red))
 	btn_remove.add_theme_stylebox_override("hover", _button_style(red))
-	_toast(Loc.t("toast.confirm_remove", {"name": _bname(buildings[sel_tile])}))
+	_toast(Loc.t("toast.confirm_remove", {"name": _bname(buildings[sel_tile]), "refund": _cost_text(_refund_of(buildings[sel_tile]))}))
 
 
 func _place(t: Vector2i, id: String) -> void:
@@ -397,7 +397,16 @@ func _remove_at(t: Vector2i) -> void:
 	_recalc()
 	_update_hud()
 	_save_game()
-	_toast(Loc.t("toast.removed", {"name": _bname(buildings_id_removed)}))
+	_toast(Loc.t("toast.removed", {"name": _bname(buildings_id_removed), "refund": _cost_text(_refund_of(buildings_id_removed))}))
+
+
+## Half of the build cost, rounded down: what demolishing gives back.
+func _refund_of(id: String) -> Dictionary:
+	var out := {}
+	var cost: Dictionary = defs[id].get("cost", {})
+	for r in cost:
+		out[r] = floorf(float(cost[r]) * 0.5)
+	return out
 
 
 func _details(id: String) -> String:

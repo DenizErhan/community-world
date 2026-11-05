@@ -35,8 +35,8 @@
   "toast.not_enough": "Not enough {res}.",
   "toast.built": "{name} built.",
   "toast.upgrade_soon": "Upgrades are not available yet.",
-  "toast.confirm_remove": "Tap the bin again to remove {name} (50% refund).",
-  "toast.removed": "{name} removed (50% refund).",
+  "toast.confirm_remove": "Tap the bin again to remove {name}. You get back 50%: {refund}.",
+  "toast.removed": "{name} removed. 50% refunded: {refund}.",
   "toast.reset_done": "Village reset.",
   "toast.offline": "While you were away: {gains}",
   "toast.offline_part": "+{n} {res}"

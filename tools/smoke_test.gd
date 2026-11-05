@@ -152,6 +152,7 @@ func _initialize() -> void:
 	check(main.remove_armed == 0.0, "selecting another building disarms Remove")
 	main._tap(Vector2i(9, 9))
 	main._on_remove_pressed()
+	check(main._refund_of("quarry")["stone"] == 6.0, "refund is half the cost, e.g. 6 of the quarry's 12 stone")
 	main._on_remove_pressed()
 	check(not main.buildings.has(Vector2i(9, 9)) and main.sel_tile == Vector2i(-1, -1), "second Remove tap demolishes the quarry")
 
