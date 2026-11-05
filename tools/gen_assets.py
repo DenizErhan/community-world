@@ -194,6 +194,41 @@ def ground(pal, variant):
     return out
 
 
+# ---- UI icons ----------------------------------------------------------------
+# Stroked glyphs (round caps), one ink color from the UI tokens. The four arrows point
+# along the grid's diagonals: the direction the neighbouring tile lies on screen.
+
+ICON = TOK["ui"]["icon"]
+IC = ICON["canvas"]
+IP = IC / 96.0  # path coordinates below are authored on a 96 grid
+
+
+def _pts(pts):
+    return " ".join("%s,%s" % (f1(x * IP), f1(y * IP)) for x, y in pts)
+
+
+def icon_svg(paths):
+    ink = TOK["ui"]["colors"][ICON["color_role"]]
+    body = ['<polyline points="%s" fill="none" stroke="%s" stroke-width="%s" '
+            'stroke-linecap="round" stroke-linejoin="round"/>' % (_pts(p), ink, f1(ICON["stroke"] * IP))
+            for p in paths]
+    return svg(IC, IC, body)
+
+
+ICONS = {
+    "confirm": [[(22, 50), (41, 69), (74, 29)]],
+    "cancel": [[(26, 26), (70, 70)], [(70, 26), (26, 70)]],
+    "arrow_nw": [[(66, 66), (30, 30)], [(30, 52), (30, 30), (52, 30)]],
+    "arrow_ne": [[(30, 66), (66, 30)], [(44, 30), (66, 30), (66, 52)]],
+    "arrow_sw": [[(66, 30), (30, 66)], [(30, 44), (30, 66), (52, 66)]],
+    "arrow_se": [[(30, 30), (66, 66)], [(66, 44), (66, 66), (44, 66)]],
+}
+
+# Godot would otherwise ship a compiled texture instead of the raw SVG text, and the web
+# build could not read it (assets.gd rasterizes the text at runtime). "keep" ships it as-is.
+IMPORT_KEEP = '[remap]\n\nimporter="keep"\n'
+
+
 # ---- driver ------------------------------------------------------------------
 
 def build():
@@ -204,6 +239,10 @@ def build():
             files["assets/buildings/%s_%s.svg" % (name, age)] = svg(SW, SH, fn(pal, age))
         for v in TOK["ground"]["variants"]:
             files["assets/ground/ground_%s_%s.svg" % (age, v)] = svg(TCW, TCH, ground(pal, v))
+    for name, paths in ICONS.items():
+        files["assets/ui/icon_%s.svg" % name] = icon_svg(paths)
+    for p in [p for p in files if p.endswith(".svg")]:
+        files[p + ".import"] = IMPORT_KEEP
     return files
 
 
@@ -223,7 +262,7 @@ def main():
         out = ROOT / p
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(s, encoding="utf-8")
-    print("Wrote %d SVG files." % len(files))
+    print("Wrote %d files (SVG art and their .import files)." % len(files))
 
 
 if __name__ == "__main__":

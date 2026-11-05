@@ -17,6 +17,10 @@ static func building_path(id: String, age: String) -> String:
 	return "res://assets/buildings/%s_%s.svg" % [id, age]
 
 
+static func icon_path(name: String) -> String:
+	return "res://assets/ui/icon_%s.svg" % name
+
+
 static func load_svg(path: String, scale: float) -> Texture2D:
 	if _cache.has(path):
 		return _cache[path]

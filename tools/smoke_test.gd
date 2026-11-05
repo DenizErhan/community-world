@@ -16,6 +16,13 @@ func check(cond: bool, label: String) -> void:
 		printerr("  FAIL  - ", label)
 
 
+## Builds through the same steps a player takes: pick the building, put the ghost on a tile, tick.
+func build_at(main: Node2D, id: String, t: Vector2i) -> void:
+	main._begin_place(id)
+	main._set_pending(t)
+	main._confirm_place()
+
+
 func _initialize() -> void:
 	var main: Node2D = (load("res://main.tscn") as PackedScene).instantiate()
 	root.add_child(main)
@@ -33,20 +40,49 @@ func _initialize() -> void:
 				rt_ok = false
 	check(rt_ok, "tile center <-> world conversion is consistent on every tile")
 
+	print("Placement ghost")
+	main._begin_place("hut")
+	check(main.pending_id == "hut", "choosing a building puts a ghost on the grid")
+	check(main._in_grid(main.pending_tile) and not main.buildings.has(main.pending_tile), "the ghost starts on a free tile")
+	check(main.place_row.visible and not main.palette_row.visible, "the tick/cross bar replaces the palette")
+	check(main.buildings.is_empty(), "nothing is built before the tick")
+	main._tap(Vector2i(6, 6))
+	check(main.pending_tile == Vector2i(6, 6) and main.buildings.is_empty(), "tapping a tile only moves the ghost")
+	main._nudge(Vector2i(1, 0))
+	check(main.pending_tile == Vector2i(7, 6), "an arrow moves the ghost one tile")
+	main._set_pending(Vector2i(-5, 99))
+	check(main.pending_tile == Vector2i(0, main.grid_h - 1), "the ghost stays inside the grid")
+	main._set_pending(Vector2i(6, 6))
+	var centre: Vector2 = main._tile_center(6, 6)
+	check(main._on_ghost(centre), "a press on the ghost grabs it")
+	check(not main._on_ghost(centre + Vector2(900, 900)), "a press far from the ghost pans the camera instead")
+	main._cancel_place()
+	check(main.pending_id == "" and main.buildings.is_empty(), "the cross cancels without building")
+	check(float(main.stock["stone"]) == 30.0, "cancelling spends nothing")
+	check(main.palette_row.visible and not main.place_row.visible, "the palette comes back after cancel")
+
 	print("Rules")
-	check(main._check_place(Vector2i(1, 1), "farm") != "", "farm cannot be built before a hut")
-	main.selected = "hut"
-	main._tap(Vector2i(6, 6))
-	check(main.buildings.has(Vector2i(6, 6)), "hut built")
+	main._begin_place("farm")
+	check(main._pending_error() != "" and main.btn_confirm.disabled, "farm cannot be confirmed before a hut (tick is disabled)")
+	main._confirm_place()
+	check(main.buildings.is_empty(), "confirming an invalid ghost builds nothing")
+	main._cancel_place()
+	build_at(main, "hut", Vector2i(6, 6))
+	check(main.buildings.has(Vector2i(6, 6)), "hut built with the tick")
 	check(absf(float(main.stock["stone"]) - 20.0) < 0.5, "hut cost 10 stone")
-	main._tap(Vector2i(6, 6))
-	check(main.buildings.size() == 1, "cannot build on an occupied tile")
-	main.selected = "quarry"
-	main._tap(Vector2i(7, 6))
+	check(main.pending_id == "", "the ghost is gone after building")
+	main._begin_place("hut")
+	main._set_pending(Vector2i(6, 6))
+	check(main._pending_error() != "", "cannot place on an occupied tile")
+	main._cancel_place()
+	build_at(main, "quarry", Vector2i(7, 6))
 	check(main.buildings.has(Vector2i(7, 6)), "quarry built")
-	main.selected = "farm"
-	main._tap(Vector2i(8, 6))
-	check(not main.buildings.has(Vector2i(8, 6)), "farm refused when stone is short")
+	main._begin_place("farm")
+	main._set_pending(Vector2i(8, 6))
+	check(main._pending_error() != "", "farm refused when stone is short")
+	main._confirm_place()
+	check(not main.buildings.has(Vector2i(8, 6)), "confirming without enough stone builds nothing")
+	main._cancel_place()
 
 	print("Production and storage")
 	var before: float = main.stock["stone"]
@@ -56,19 +92,45 @@ func _initialize() -> void:
 	check(float(main.stock["stone"]) <= float(main.caps["stone"]) + 0.001, "stock never exceeds the cap")
 	check(float(main.caps["stone"]) == 75.0, "hut raised storage 50 -> 75")
 
+	print("Tapping a building")
+	var hut_c: Vector2 = main._tile_center(6, 6)
+	check(main._world_to_tile(hut_c + Vector2(0, -45)) != Vector2i(6, 6), "(the roof is drawn over a different ground tile)")
+	check(main._pick_tile(hut_c + Vector2(0, -45)) == Vector2i(6, 6), "a tap on the hut's body picks the hut, not the tile behind it")
+	check(main._pick_tile(hut_c + Vector2(300, 0)) == main._world_to_tile(hut_c + Vector2(300, 0)), "a tap on open ground picks that ground tile")
+	check(main._pick_tile(hut_c + Vector2(0, -260)) != Vector2i(6, 6), "a tap well above the roof does not pick the hut")
+
+	print("Moving a building")
+	var stone_before_move: float = main.stock["stone"]
+	main._tap(Vector2i(7, 6))
+	check(main.pending_id == "quarry" and main.moving_from == Vector2i(7, 6), "tapping a building picks it up")
+	check(main.buildings.has(Vector2i(7, 6)), "the building stays where it was until the tick")
+	main._set_pending(Vector2i(6, 6))
+	check(main._pending_error() != "", "cannot move onto an occupied tile")
+	main._set_pending(Vector2i(9, 9))
+	main._confirm_place()
+	check(main.buildings.has(Vector2i(9, 9)) and not main.buildings.has(Vector2i(7, 6)), "tick moves the building")
+	check(float(main.stock["stone"]) == stone_before_move, "moving is free")
+	check(absf(float(main.rates["stone"]) - 0.5) < 0.001, "production is unchanged by moving")
+	main._tap(Vector2i(9, 9))
+	main._set_pending(Vector2i(3, 3))
+	main._cancel_place()
+	check(main.buildings.has(Vector2i(9, 9)) and not main.buildings.has(Vector2i(3, 3)), "cross puts the building back")
+
 	print("Save / load")
 	main._save_game()
 	var main2: Node2D = (load("res://main.tscn") as PackedScene).instantiate()
 	root.add_child(main2)
 	await process_frame
 	check(main2.buildings.size() == 2, "2 buildings restored from save")
-	check(main2.buildings.has(Vector2i(7, 6)), "building position preserved")
+	check(main2.buildings.has(Vector2i(9, 9)), "moved building position is saved")
+	check(main2.pending_id == "", "no ghost after loading a village that has buildings")
 	main2.queue_free()
 
 	print("Demolish")
 	main.selected = "_remove"
-	main._tap(Vector2i(7, 6))
-	check(not main.buildings.has(Vector2i(7, 6)), "quarry demolished")
+	main._tap(Vector2i(9, 9))
+	check(not main.buildings.has(Vector2i(9, 9)), "quarry demolished")
+	main.selected = ""
 
 	print("Design system")
 	var tokens_ok: bool = main.tok.has("ages") and main.tok["ages"].has(main.age)
@@ -85,6 +147,12 @@ func _initialize() -> void:
 			if not FileAccess.file_exists("res://assets/buildings/%s_%s.svg" % [id, a]):
 				all_ages_ok = false
 	check(all_ages_ok, "assets exist for every building in every age")
+	var icons_ok := true
+	for n in ["confirm", "cancel", "arrow_nw", "arrow_ne", "arrow_sw", "arrow_se"]:
+		if not FileAccess.file_exists("res://assets/ui/icon_%s.svg" % n):
+			icons_ok = false
+	check(icons_ok, "tick, cross and the four arrow icons exist")
+	check(main.btn_confirm.icon != null and main.btn_cancel.icon != null, "tick and cross buttons have their icons loaded")
 
 	print("Localization")
 	Loc.init_locale("xx")
@@ -97,7 +165,10 @@ func _initialize() -> void:
 		for k in ["name", "short"]:
 			if Loc.t("building.%s.%s" % [id, k]) == "building.%s.%s" % [id, k]:
 				missing = false
-	check(missing, "every resource and building has English strings")
+	for k in ["place.new", "place.move", "toast.moved", "toast.welcome"]:
+		if Loc.t(k) == k:
+			missing = false
+	check(missing, "every resource, building and placement message has English strings")
 	check(Loc.t("toast.built", {"name": "Farm"}) == "Farm built.", "placeholders are substituted")
 	check(Loc.t("no.such.key") == "no.such.key", "missing keys return the key (visible gap, no crash)")
 

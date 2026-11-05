@@ -46,7 +46,17 @@ var stock: Dictionary = {}       # kaynak id -> float
 var rates: Dictionary = {}       # resource id -> production per second
 var caps: Dictionary = {}        # resource id -> storage cap
 
-var selected: String = ""        # "" = inspect, building id = build, REMOVE = demolish
+var selected: String = ""        # "" = nothing, REMOVE = demolish tool (building tools use pending_*)
+
+# Placement: a ghost on the grid for a NEW building or one being MOVED. Nothing is built or
+# moved until the tick is pressed; the cross puts everything back.
+var pending_id: String = ""
+var pending_tile: Vector2i = Vector2i(-1, -1)
+var moving_from: Vector2i = Vector2i(-1, -1)   # (-1, -1) = placing a new building
+var intro_text: String = ""                    # first-run hint shown until the ghost is touched
+var ghost_grab: bool = false                   # the current drag started on the ghost
+var ghost_dragged: bool = false
+var grab_offset: Vector2i = Vector2i.ZERO
 var hover: Vector2i = Vector2i(-1, -1)
 var cam: Camera2D
 var ready_ok: bool = false
@@ -59,6 +69,12 @@ var drag_moved: float = 0.0
 
 # HUD
 var hud_root: VBoxContainer
+var hud_top: PanelContainer
+var hud_bottom: PanelContainer
+var palette_row: HBoxContainer
+var place_row: HBoxContainer
+var btn_confirm: Button
+var btn_cancel: Button
 var res_labels: Dictionary = {}
 var btns: Dictionary = {}
 var toast_label: Label
@@ -88,8 +104,9 @@ func _ready() -> void:
 	_recalc()
 	_update_hud()
 	if buildings.is_empty():
-		btns[def_order[0]].button_pressed = true
-		_toast(Loc.t("toast.welcome"))
+		btns[def_order[0]].button_pressed = true   # starts placing the first hut
+		intro_text = Loc.t("toast.welcome")
+		_refresh_place_ui()
 	ready_ok = true
 	queue_redraw()
 
@@ -255,13 +272,14 @@ func _process(delta: float) -> void:
 
 func _tap(t: Vector2i) -> void:
 	hover = t
-	if _in_grid(t):
-		if selected == "":
-			_inspect(t)
-		elif selected == REMOVE:
-			_remove_at(t)
-		else:
-			_place(t, selected)
+	if not _in_grid(t):
+		return
+	if pending_id != "":
+		_set_pending(t)            # a tap only moves the ghost; the tick builds
+	elif selected == REMOVE:
+		_remove_at(t)
+	elif buildings.has(t):
+		_begin_place(buildings[t], t)   # tap a building to pick it up and move it
 	queue_redraw()
 
 
@@ -296,10 +314,8 @@ func _remove_at(t: Vector2i) -> void:
 	_toast(Loc.t("toast.removed", {"name": _bname(buildings_id_removed)}))
 
 
-func _inspect(t: Vector2i) -> void:
-	if not buildings.has(t):
-		return
-	var d: Dictionary = defs[buildings[t]]
+func _details(id: String) -> String:
+	var d: Dictionary = defs[id]
 	var parts: PackedStringArray = []
 	var prod: Dictionary = d.get("produces", {})
 	for r in prod:
@@ -307,10 +323,175 @@ func _inspect(t: Vector2i) -> void:
 	var cap_add: float = float(d.get("capacity", 0))
 	if cap_add > 0.0:
 		parts.append(Loc.t("info.storage", {"n": int(cap_add)}))
-	_toast(Loc.t("info.line", {"name": _bname(buildings[t]), "details": Loc.t("info.join").join(parts)}))
+	return Loc.t("info.join").join(parts)
+
+
+# ---------------------------------------------------------------- placement / moving
+
+func _begin_place(id: String, from: Vector2i = Vector2i(-1, -1)) -> void:
+	pending_id = id
+	moving_from = from
+	intro_text = ""
+	pending_tile = from if from.x >= 0 else _nearest_free(_world_to_tile(cam.position))
+	palette_row.visible = false
+	place_row.visible = true
+	_refresh_place_ui()
+	_ensure_ghost_visible()
+	queue_redraw()
+
+
+func _end_place() -> void:
+	pending_id = ""
+	moving_from = Vector2i(-1, -1)
+	intro_text = ""
+	ghost_grab = false
+	ghost_dragged = false
+	if place_row != null:
+		place_row.visible = false
+		palette_row.visible = true
+	for id in def_order:
+		var b: Button = btns[id]
+		b.button_pressed = false
+	queue_redraw()
+
+
+func _nearest_free(c: Vector2i) -> Vector2i:
+	c = Vector2i(clampi(c.x, 0, grid_w - 1), clampi(c.y, 0, grid_h - 1))
+	if not buildings.has(c):
+		return c
+	var best := c
+	var best_d := 1 << 30
+	for gx in range(grid_w):
+		for gy in range(grid_h):
+			var t := Vector2i(gx, gy)
+			if buildings.has(t):
+				continue
+			var d := absi(t.x - c.x) + absi(t.y - c.y)
+			if d < best_d:
+				best_d = d
+				best = t
+	return best
+
+
+func _set_pending(t: Vector2i) -> void:
+	if pending_id == "":
+		return
+	t = Vector2i(clampi(t.x, 0, grid_w - 1), clampi(t.y, 0, grid_h - 1))
+	if t != pending_tile:
+		pending_tile = t
+		intro_text = ""
+		_refresh_place_ui()
+		queue_redraw()
+
+
+func _nudge(d: Vector2i) -> void:
+	_set_pending(pending_tile + d)
+	_ensure_ghost_visible()
+
+
+## Empty string = the ghost may be confirmed where it is, otherwise the reason.
+func _pending_error() -> String:
+	if pending_id == "":
+		return ""
+	if moving_from.x >= 0:
+		if pending_tile != moving_from and buildings.has(pending_tile):
+			return Loc.t("toast.occupied")
+		return ""
+	return _check_place(pending_tile, pending_id)
+
+
+func _confirm_place() -> void:
+	if pending_id == "":
+		return
+	var err := _pending_error()
+	if err != "":
+		_hold_info(err, true)
+		return
+	var id := pending_id
+	var t := pending_tile
+	if moving_from.x >= 0:
+		var from := moving_from
+		_end_place()
+		if t != from:
+			buildings.erase(from)
+			buildings[t] = id
+			_save_game()
+			_toast(Loc.t("toast.moved", {"name": _bname(id)}))
+	else:
+		_end_place()
+		_place(t, id)
+
+
+func _cancel_place() -> void:
+	if pending_id != "":
+		_end_place()
+
+
+func _refresh_place_ui() -> void:
+	if pending_id == "" or btn_confirm == null:
+		return
+	var err := _pending_error()
+	btn_confirm.disabled = err != ""
+	if err != "":
+		_hold_info(err, true)
+	elif intro_text != "":
+		_hold_info(intro_text)
+	elif moving_from.x >= 0:
+		_hold_info(Loc.t("place.move", {"name": _bname(pending_id), "details": _details(pending_id)}))
+	else:
+		_hold_info(Loc.t("place.new", {"name": _bname(pending_id)}))
+
+
+## Keep the ghost between the two HUD bars; recenter the camera on it if it is out of view.
+func _ensure_ghost_visible() -> void:
+	if pending_id == "" or cam == null:
+		return
+	var margin: float = float(tok["ui"]["placement"]["view_margin"])
+	var vp := get_viewport_rect().size
+	var top_h := hud_top.size.y if hud_top != null else 0.0
+	var bot_h := hud_bottom.size.y if hud_bottom != null else 0.0
+	var tc := _tile_center(pending_tile.x, pending_tile.y)
+	var sp := get_canvas_transform() * tc
+	if sp.x >= margin and sp.x <= vp.x - margin and sp.y >= top_h + margin and sp.y <= vp.y - bot_h - margin * 0.5:
+		return
+	var free_cy := (top_h + vp.y - bot_h) * 0.5
+	cam.position = tc - Vector2(0.0, free_cy - vp.y * 0.5) / cam.zoom.y
+	_clamp_cam()
+
+
+## The tile a tap means. With a ghost out, that is the ground tile under the finger. Otherwise a tap
+## on a building's visible body counts even when the body stands over the tile behind it; the
+## front-most building wins.
+func _pick_tile(w: Vector2) -> Vector2i:
+	var ground := _world_to_tile(w)
+	if pending_id != "":
+		return ground
+	var best := ground
+	var best_depth := -1
+	if buildings.has(ground):
+		best_depth = ground.x + ground.y
+	# The hit box is never smaller than a fingertip on screen, however far the map is zoomed out.
+	var rise: float = maxf(float(tok["ui"]["placement"]["pick_height"]), float(tok["ui"]["placement"]["pick_min_px"]) / cam.zoom.y)
+	var half_w: float = maxf(TW * 0.4, float(tok["ui"]["placement"]["pick_min_px"]) * 0.6 / cam.zoom.x)
+	for t in buildings:
+		var c := _tile_center(t.x, t.y)
+		if absf(w.x - c.x) <= half_w and w.y <= c.y + TH * 0.25 and w.y >= c.y - rise:
+			var depth: int = t.x + t.y
+			if depth > best_depth:
+				best = t
+				best_depth = depth
+	return best
+
+
+func _on_ghost(world: Vector2) -> bool:
+	var grab: float = maxf(float(tok["ui"]["placement"]["grab_px"]), TW * 0.7 * cam.zoom.x)
+	var centre := get_canvas_transform() * (_tile_center(pending_tile.x, pending_tile.y) + Vector2(0, -sprite_anchor.y * 0.4))
+	var pointer := get_canvas_transform() * world
+	return pointer.distance_to(centre) <= grab
 
 
 func _reset_game() -> void:
+	_end_place()
 	buildings.clear()
 	for r in res_defs:
 		stock[r] = float(start_stock.get(r, 0))
@@ -402,19 +583,36 @@ func _unhandled_input(event: InputEvent) -> void:
 				if touches.size() < 2:
 					dragging = true
 					drag_moved = 0.0
+					ghost_grab = false
+					ghost_dragged = false
+					if pending_id != "":
+						var w := get_canvas_transform().affine_inverse() * mb.position
+						if _on_ghost(w):
+							ghost_grab = true
+							grab_offset = pending_tile - _world_to_tile(w)
 					_set_hover(_screen_to_tile(mb.position))
 			else:
-				if dragging and drag_moved < TAP_SLOP:
-					_tap(_screen_to_tile(mb.position))
+				if dragging and drag_moved < TAP_SLOP and not ghost_dragged:
+					_tap(_pick_tile(get_canvas_transform().affine_inverse() * mb.position))
 				dragging = false
+				ghost_grab = false
 	elif event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
 		_set_hover(_screen_to_tile(mm.position))
 		if dragging and touches.size() < 2:
 			drag_moved += mm.relative.length()
-			if drag_moved >= TAP_SLOP:
+			if ghost_grab:
+				if drag_moved >= float(tok["ui"]["placement"]["drag_slop"]):
+					ghost_dragged = true
+					_set_pending(_screen_to_tile(mm.position) + grab_offset)
+			elif drag_moved >= TAP_SLOP:
 				cam.position -= mm.relative * PAN_SPEED / cam.zoom.x
 				_clamp_cam()
+	elif event is InputEventKey and (event as InputEventKey).pressed and not (event as InputEventKey).echo:
+		if event.is_action_pressed("ui_accept"):
+			_confirm_place()
+		elif event.is_action_pressed("ui_cancel"):
+			_cancel_place()
 
 
 func _set_hover(t: Vector2i) -> void:
@@ -467,21 +665,21 @@ func _draw() -> void:
 			var gt: Texture2D = tex_ground[(gx + gy) % 2]
 			if gt != null:
 				draw_texture_rect(gt, Rect2(c - tile_anchor, tile_canvas), false)
-			if buildings.has(t):
+			if buildings.has(t) and t != moving_from:
 				_draw_building(c, buildings[t])
+			if pending_id != "" and t == pending_tile:
+				_draw_building(c, pending_id, float(tok["ui"]["world"]["ghost_alpha"]))
 
-	if _in_grid(hover):
-		var hc := _tile_center(hover.x, hover.y)
+	if pending_id != "":
+		if moving_from.x >= 0 and moving_from != pending_tile:
+			_outline(_tile_center(moving_from.x, moving_from.y), _wcol("hover_dim"))
+		var ok := _pending_error() == ""
+		_outline(_tile_center(pending_tile.x, pending_tile.y), _wcol("hover_ok") if ok else _wcol("hover_bad"))
+	elif _in_grid(hover):
 		var outline := _wcol("hover_neutral")
 		if selected == REMOVE:
 			outline = _wcol("hover_bad") if buildings.has(hover) else _wcol("hover_dim")
-		elif selected != "":
-			if _check_place(hover, selected) == "":
-				_draw_building(hc, selected, float(tok["ui"]["world"]["ghost_alpha"]))
-				outline = _wcol("hover_ok")
-			else:
-				outline = _wcol("hover_bad")
-		_outline(hc, outline)
+		_outline(_tile_center(hover.x, hover.y), outline)
 
 
 # ---------------------------------------------------------------- HUD
@@ -538,6 +736,7 @@ func _build_hud() -> void:
 
 	# top bar: resource counters
 	var top := PanelContainer.new()
+	hud_top = top
 	top.add_theme_stylebox_override("panel", _style(_ucol("panel_top")))
 	root.add_child(top)
 	var row := HBoxContainer.new()
@@ -565,6 +764,7 @@ func _build_hud() -> void:
 
 	# bottom bar: building palette + info line
 	var bottom := PanelContainer.new()
+	hud_bottom = bottom
 	bottom.add_theme_stylebox_override("panel", _style(_ucol("panel_bottom")))
 	root.add_child(bottom)
 	var vb := VBoxContainer.new()
@@ -573,11 +773,33 @@ func _build_hud() -> void:
 	toast_label = Label.new()
 	toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	toast_label.custom_minimum_size = Vector2(0, 36)
+	toast_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	toast_label.modulate.a = 0.0
 	vb.add_child(toast_label)
 	var hb := HBoxContainer.new()
 	hb.add_theme_constant_override("separation", gap)
 	vb.add_child(hb)
+	palette_row = hb
+
+	# placement bar (replaces the palette while a ghost is on the grid):
+	# cross, four diagonal arrows (they point the way the next tile lies), tick
+	place_row = HBoxContainer.new()
+	place_row.add_theme_constant_override("separation", gap)
+	place_row.visible = false
+	vb.add_child(place_row)
+	var stretch: float = float(tok["ui"]["placement"]["confirm_stretch"])
+	btn_cancel = _icon_button("cancel", "button_cancel")
+	btn_cancel.size_flags_stretch_ratio = stretch
+	btn_cancel.pressed.connect(_cancel_place)
+	place_row.add_child(btn_cancel)
+	for a in [["arrow_nw", Vector2i(-1, 0)], ["arrow_sw", Vector2i(0, 1)], ["arrow_ne", Vector2i(0, -1)], ["arrow_se", Vector2i(1, 0)]]:
+		var ab := _icon_button(a[0], "button_normal")
+		ab.pressed.connect(_nudge.bind(a[1]))
+		place_row.add_child(ab)
+	btn_confirm = _icon_button("confirm", "button_confirm")
+	btn_confirm.size_flags_stretch_ratio = stretch
+	btn_confirm.pressed.connect(_confirm_place)
+	place_row.add_child(btn_confirm)
 
 	var group := ButtonGroup.new()
 	group.allow_unpress = true
@@ -599,6 +821,28 @@ func _build_hud() -> void:
 		btns[id] = b
 
 
+func _icon_button(icon_name: String, color_key: String) -> Button:
+	var ic: Dictionary = tok["ui"]["icon"]
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(0, int(tok["ui"]["button"]["min_height"]))
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# Rasterized at 2x the display size, drawn down with mipmaps so it stays crisp on phones.
+	b.icon = Assets.load_svg(Assets.icon_path(icon_name), float(ic["display"]) * 2.0 / float(ic["canvas"]))
+	b.expand_icon = true
+	b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	b.vertical_icon_alignment = VERTICAL_ALIGNMENT_CENTER
+	b.add_theme_constant_override("icon_max_width", int(ic["display"]))
+	b.add_theme_color_override("icon_disabled_color", Color(1, 1, 1, float(ic["disabled_alpha"])))
+	b.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	var col := _ucol(color_key)
+	for st in ["normal", "hover"]:
+		b.add_theme_stylebox_override(st, _button_style(col))
+	for st in ["pressed", "hover_pressed"]:
+		b.add_theme_stylebox_override(st, _button_style(col.darkened(0.15)))
+	b.add_theme_stylebox_override("disabled", _button_style(_ucol("button_disabled")))
+	return b
+
+
 func _fit_hud() -> void:
 	if hud_root != null:
 		hud_root.position = Vector2.ZERO
@@ -606,10 +850,14 @@ func _fit_hud() -> void:
 
 
 func _on_btn_toggled(on: bool, id: String) -> void:
-	if on:
-		selected = id
-	elif selected == id:
+	if id == REMOVE:
+		if on:
+			selected = REMOVE
+		elif selected == REMOVE:
+			selected = ""
+	elif on:
 		selected = ""
+		_begin_place(id)
 	queue_redraw()
 
 
@@ -640,6 +888,21 @@ func _update_hud() -> void:
 		b.disabled = locked
 		var ok: bool = _afford(d.get("cost", {})) and not locked
 		b.modulate = Color.WHITE if ok else _ucol("button_unaffordable_tint")
+	_refresh_place_ui()
+
+
+## Show text on the info line and keep it there (no fade) while a ghost is being placed.
+func _hold_info(msg: String, warn: bool = false) -> void:
+	if toast_label == null:
+		return
+	if toast_tween != null and toast_tween.is_valid():
+		toast_tween.kill()
+	toast_label.text = msg
+	toast_label.modulate.a = 1.0
+	if warn:
+		toast_label.add_theme_color_override("font_color", _ucol("text_warn"))
+	else:
+		toast_label.remove_theme_color_override("font_color")
 
 
 func _toast(msg: String) -> void:
@@ -647,6 +910,7 @@ func _toast(msg: String) -> void:
 		return
 	toast_label.text = msg
 	toast_label.modulate.a = 1.0
+	toast_label.remove_theme_color_override("font_color")
 	if toast_tween != null and toast_tween.is_valid():
 		toast_tween.kill()
 	toast_tween = create_tween()

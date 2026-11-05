@@ -13,12 +13,15 @@ A collaborative village-building game: mobile, isometric 2.5D, 50-player servers
 
 | Action | Phone | Desktop |
 |---|---|---|
-| Build / remove | Pick a tool at the bottom, tap a tile | Same, click |
-| Pan | Drag | Drag |
+| Place a building | Pick it at the bottom. A ghost appears on the map: drag it, tap a tile, or nudge it with the four arrows, then tap the green tick (the red cross cancels) | Same, click; `Enter` confirms, `Esc` cancels |
+| Move a building | Tap it, move the ghost the same way, tick to confirm (free); cross puts it back | Same |
+| Remove | Pick **Remove**, tap a building (refunds 50%) | Same |
+| Pan | Drag the map (a drag that starts on the ghost moves the ghost instead) | Drag |
 | Zoom | Two fingers | Mouse wheel |
-| Inspect | With no tool selected, tap a building | Same |
 
-Build a **Stone Hut** first: it unlocks everything else and adds storage. Remove refunds 50%. Progress is saved in the browser; production keeps accumulating for up to 8 hours while the game is closed. **Reset** (top right) needs two taps.
+Nothing is built or moved until you tap the tick. The tick is greyed out, and the info line says why, when the spot is taken or you cannot afford it. The arrows point the way the next tile lies on screen.
+
+Build a **Stone Hut** first: it unlocks everything else and adds storage. Progress is saved in the browser; production keeps accumulating for up to 8 hours while the game is closed. **Reset** (top right) needs two taps.
 
 ## Repo layout
 
@@ -26,7 +29,7 @@ Build a **Stone Hut** first: it unlocks everything else and adds storage. Remove
 - `loc.gd` and `data/locales/en.json`: all player-facing text, looked up by key
 - `data/buildings.json`: gameplay data only (resources, costs, production, storage)
 - `design/tokens.json`: the design system source of truth (palettes per age, shading, shape parameters, UI colors and sizes)
-- `tools/gen_assets.py`: generates every SVG in `assets/` from the tokens (`--check` fails CI when they are stale)
+- `tools/gen_assets.py`: generates every SVG in `assets/` (world art and UI icons) and its `.import` file from the tokens (`--check` fails CI when they are stale)
 - `assets.gd`: rasterizes the SVGs at runtime so they stay sharp when zoomed in
 - `tools/smoke_test.gd`: headless test (`godot --headless --script res://tools/smoke_test.gd`)
 - `.github/workflows/web.yml`: export and deploy

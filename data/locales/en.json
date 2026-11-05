@@ -24,10 +24,13 @@
 
   "info.produces": "+{rate} {res}/s",
   "info.storage": "storage +{n}",
-  "info.line": "{name}: {details}",
   "info.join": ", ",
 
-  "toast.welcome": "Welcome! Build a Stone Hut first.",
+  "place.new": "Place {name}: drag it, tap a tile or use the arrows.",
+  "place.move": "Moving {name} ({details}).",
+
+  "toast.welcome": "Welcome! Place your first hut, then tap the tick.",
+  "toast.moved": "{name} moved.",
   "toast.occupied": "That tile is taken.",
   "toast.need_building": "Build a {name} first.",
   "toast.not_enough": "Not enough {res}.",
