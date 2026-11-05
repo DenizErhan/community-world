@@ -207,11 +207,22 @@ def _pts(pts):
     return " ".join("%s,%s" % (f1(x * IP), f1(y * IP)) for x, y in pts)
 
 
-def icon_svg(paths):
+def icon_svg(items):
+    """items: a list of points = a stroked polyline; ("ring", cx, cy, r) = stroked circle;
+    ("dot", cx, cy, r) = filled circle."""
     ink = TOK["ui"]["colors"][ICON["color_role"]]
-    body = ['<polyline points="%s" fill="none" stroke="%s" stroke-width="%s" '
-            'stroke-linecap="round" stroke-linejoin="round"/>' % (_pts(p), ink, f1(ICON["stroke"] * IP))
-            for p in paths]
+    sw = f1(ICON["stroke"] * IP)
+    body = []
+    for it in items:
+        if isinstance(it, tuple) and it[0] == "ring":
+            body.append('<circle cx="%s" cy="%s" r="%s" fill="none" stroke="%s" stroke-width="%s"/>'
+                        % (f1(it[1] * IP), f1(it[2] * IP), f1(it[3] * IP), ink, sw))
+        elif isinstance(it, tuple) and it[0] == "dot":
+            body.append('<circle cx="%s" cy="%s" r="%s" fill="%s"/>'
+                        % (f1(it[1] * IP), f1(it[2] * IP), f1(it[3] * IP), ink))
+        else:
+            body.append('<polyline points="%s" fill="none" stroke="%s" stroke-width="%s" '
+                        'stroke-linecap="round" stroke-linejoin="round"/>' % (_pts(it), ink, sw))
     return svg(IC, IC, body)
 
 
@@ -222,6 +233,14 @@ ICONS = {
     "arrow_ne": [[(30, 66), (66, 30)], [(44, 30), (66, 30), (66, 52)]],
     "arrow_sw": [[(66, 30), (30, 66)], [(30, 44), (30, 66), (52, 66)]],
     "arrow_se": [[(30, 30), (66, 66)], [(66, 44), (66, 66), (44, 66)]],
+    # building actions
+    "info": [("ring", 48, 48, 34), ("dot", 48, 32, 6.5), [(48, 47), (48, 67)]],
+    "move": [[(48, 18), (48, 78)], [(18, 48), (78, 48)],
+             [(38, 28), (48, 18), (58, 28)], [(38, 68), (48, 78), (58, 68)],
+             [(28, 38), (18, 48), (28, 58)], [(68, 38), (78, 48), (68, 58)]],
+    "upgrade": [[(24, 52), (48, 28), (72, 52)], [(24, 76), (48, 52), (72, 76)]],
+    "remove": [[(22, 30), (74, 30)], [(38, 30), (38, 20), (58, 20), (58, 30)],
+               [(30, 30), (34, 76), (62, 76), (66, 30)]],
 }
 
 # Godot would otherwise ship a compiled texture instead of the raw SVG text, and the web

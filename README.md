@@ -14,8 +14,9 @@ A collaborative village-building game: mobile, isometric 2.5D, 50-player servers
 | Action | Phone | Desktop |
 |---|---|---|
 | Place a building | Pick it at the bottom. A ghost appears on the map: drag it, tap a tile, or nudge it with the four arrows, then tap the green tick (the red cross cancels) | Same, click; `Enter` confirms, `Esc` cancels |
-| Move a building | Tap it, move the ghost the same way, tick to confirm (free); cross puts it back | Same |
-| Remove | Pick **Remove**, tap a building (refunds 50%) | Same |
+| Select a building | Tap it: a menu appears under it (Info, Move, Upgrade, Remove). Tap empty ground to close it | Same |
+| Move a building | Select it, tap **Move**, move the ghost the same way, tick to confirm (free); cross puts it back | Same |
+| Remove | Select it, tap the bin twice (refunds 50%). Upgrade is a placeholder for now | Same |
 | Pan | Drag the map (a drag that starts on the ghost moves the ghost instead) | Drag |
 | Zoom | Two fingers | Mouse wheel |
 

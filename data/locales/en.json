@@ -14,8 +14,6 @@
 
   "ui.reset": "Reset",
   "ui.reset_confirm": "Sure?",
-  "ui.remove": "Remove",
-  "ui.remove_sub": "50% refund",
   "ui.res_line": "{name} {cur}/{cap}",
   "ui.rate": "+{rate}/s",
   "ui.no_rate": "-",
@@ -25,6 +23,7 @@
   "info.produces": "+{rate} {res}/s",
   "info.storage": "storage +{n}",
   "info.join": ", ",
+  "info.line": "{name}: {details}",
 
   "place.new": "Place {name}: drag it, tap a tile or use the arrows.",
   "place.move": "Moving {name} ({details}).",
@@ -35,6 +34,8 @@
   "toast.need_building": "Build a {name} first.",
   "toast.not_enough": "Not enough {res}.",
   "toast.built": "{name} built.",
+  "toast.upgrade_soon": "Upgrades are not available yet.",
+  "toast.confirm_remove": "Tap the bin again to remove {name} (50% refund).",
   "toast.removed": "{name} removed (50% refund).",
   "toast.reset_done": "Village reset.",
   "toast.offline": "While you were away: {gains}",

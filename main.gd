@@ -12,7 +12,6 @@ const PAN_SPEED := 0.8     # drag pans the camera at 80% of finger speed (feels 
 const START_ZOOM := 0.4    # whole island fits a 720 px wide screen
 const ZOOM_MIN := 0.3
 const ZOOM_MAX := 1.6
-const REMOVE := "_remove"
 const Loc := preload("res://loc.gd")
 const Assets := preload("res://assets.gd")
 const TOKENS_PATH := "res://design/tokens.json"
@@ -46,7 +45,11 @@ var stock: Dictionary = {}       # kaynak id -> float
 var rates: Dictionary = {}       # resource id -> production per second
 var caps: Dictionary = {}        # resource id -> storage cap
 
-var selected: String = ""        # "" = nothing, REMOVE = demolish tool (building tools use pending_*)
+# Selection: tapping a building selects it and shows an action menu under it.
+var sel_tile: Vector2i = Vector2i(-1, -1)
+var action_menu: PanelContainer
+var btn_remove: Button
+var remove_armed: float = 0.0
 
 # Placement: a ghost on the grid for a NEW building or one being MOVED. Nothing is built or
 # moved until the tick is pressed; the cross puts everything back.
@@ -57,7 +60,6 @@ var intro_text: String = ""                    # first-run hint shown until the 
 var ghost_grab: bool = false                   # the current drag started on the ghost
 var ghost_dragged: bool = false
 var grab_offset: Vector2i = Vector2i.ZERO
-var hover: Vector2i = Vector2i(-1, -1)
 var cam: Camera2D
 var ready_ok: bool = false
 
@@ -268,19 +270,103 @@ func _process(delta: float) -> void:
 		reset_armed -= delta
 		if reset_armed <= 0.0:
 			reset_btn.text = Loc.t("ui.reset")
+	if remove_armed > 0.0:
+		remove_armed -= delta
+		if remove_armed <= 0.0:
+			_disarm_remove()
+	_position_menu()
 
 
 func _tap(t: Vector2i) -> void:
-	hover = t
-	if not _in_grid(t):
-		return
 	if pending_id != "":
-		_set_pending(t)            # a tap only moves the ghost; the tick builds
-	elif selected == REMOVE:
-		_remove_at(t)
-	elif buildings.has(t):
-		_begin_place(buildings[t], t)   # tap a building to pick it up and move it
+		if _in_grid(t):
+			_set_pending(t)        # a tap only moves the ghost; the tick builds
+	elif _in_grid(t) and buildings.has(t):
+		_select(t)                 # a tap only selects; the menu offers the actions
+	else:
+		_deselect()
 	queue_redraw()
+
+
+# ---------------------------------------------------------------- selection / action menu
+
+func _select(t: Vector2i) -> void:
+	if t != sel_tile:
+		_disarm_remove()
+	sel_tile = t
+	action_menu.visible = true
+	_position_menu()
+	queue_redraw()
+
+
+func _deselect() -> void:
+	sel_tile = Vector2i(-1, -1)
+	_disarm_remove()
+	if action_menu != null:
+		action_menu.visible = false
+	queue_redraw()
+
+
+func _disarm_remove() -> void:
+	remove_armed = 0.0
+	if btn_remove != null:
+		btn_remove.add_theme_stylebox_override("normal", _button_style(_ucol("button_normal")))
+		btn_remove.add_theme_stylebox_override("hover", _button_style(_ucol("button_normal")))
+
+
+## Keeps the menu under the selected building (above it when the bottom bar would cover it).
+func _position_menu() -> void:
+	if action_menu == null or not action_menu.visible:
+		return
+	if not buildings.has(sel_tile) or pending_id != "":
+		_deselect()
+		return
+	var ab: Dictionary = tok["ui"]["actionbar"]
+	var size := action_menu.get_combined_minimum_size()
+	action_menu.size = size
+	var c := get_canvas_transform() * _tile_center(sel_tile.x, sel_tile.y)
+	var vp := get_viewport_rect().size
+	var margin := float(ab["margin"])
+	var pos := Vector2(c.x - size.x * 0.5, c.y + TH * 0.5 * cam.zoom.y + float(ab["offset"]))
+	var bottom_y := vp.y - (hud_bottom.size.y if hud_bottom != null else 0.0)
+	if pos.y + size.y > bottom_y - margin:
+		pos.y = c.y - float(tok["ui"]["placement"]["pick_height"]) * cam.zoom.y - size.y - float(ab["offset"])
+	var top_y := hud_top.size.y if hud_top != null else 0.0
+	pos.y = clampf(pos.y, top_y + margin, maxf(top_y + margin, bottom_y - size.y - margin))
+	pos.x = clampf(pos.x, margin, maxf(margin, vp.x - size.x - margin))
+	action_menu.position = pos
+
+
+func _on_info_pressed() -> void:
+	if buildings.has(sel_tile):
+		var id: String = buildings[sel_tile]
+		_toast(Loc.t("info.line", {"name": _bname(id), "details": _details(id)}))
+
+
+func _on_move_pressed() -> void:
+	if buildings.has(sel_tile):
+		var t := sel_tile
+		_deselect()
+		_begin_place(buildings[t], t)
+
+
+func _on_upgrade_pressed() -> void:
+	_toast(Loc.t("toast.upgrade_soon"))
+
+
+func _on_remove_pressed() -> void:
+	if not buildings.has(sel_tile):
+		return
+	if remove_armed > 0.0:
+		var t := sel_tile
+		_deselect()
+		_remove_at(t)
+		return
+	remove_armed = float(tok["ui"]["actionbar"]["arm_seconds"])
+	var red := _ucol("button_cancel")
+	btn_remove.add_theme_stylebox_override("normal", _button_style(red))
+	btn_remove.add_theme_stylebox_override("hover", _button_style(red))
+	_toast(Loc.t("toast.confirm_remove", {"name": _bname(buildings[sel_tile])}))
 
 
 func _place(t: Vector2i, id: String) -> void:
@@ -329,6 +415,7 @@ func _details(id: String) -> String:
 # ---------------------------------------------------------------- placement / moving
 
 func _begin_place(id: String, from: Vector2i = Vector2i(-1, -1)) -> void:
+	_deselect()
 	pending_id = id
 	moving_from = from
 	intro_text = ""
@@ -496,7 +583,7 @@ func _reset_game() -> void:
 	buildings.clear()
 	for r in res_defs:
 		stock[r] = float(start_stock.get(r, 0))
-	selected = ""
+	_deselect()
 	for id in btns:
 		var b: Button = btns[id]
 		b.button_pressed = false
@@ -591,7 +678,6 @@ func _unhandled_input(event: InputEvent) -> void:
 						if _on_ghost(w):
 							ghost_grab = true
 							grab_offset = pending_tile - _world_to_tile(w)
-					_set_hover(_screen_to_tile(mb.position))
 			else:
 				if dragging and drag_moved < TAP_SLOP and not ghost_dragged:
 					_tap(_pick_tile(get_canvas_transform().affine_inverse() * mb.position))
@@ -599,7 +685,6 @@ func _unhandled_input(event: InputEvent) -> void:
 				ghost_grab = false
 	elif event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
-		_set_hover(_screen_to_tile(mm.position))
 		if dragging and touches.size() < 2:
 			drag_moved += mm.relative.length()
 			if ghost_grab:
@@ -613,13 +698,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.is_action_pressed("ui_accept"):
 			_confirm_place()
 		elif event.is_action_pressed("ui_cancel"):
-			_cancel_place()
-
-
-func _set_hover(t: Vector2i) -> void:
-	if t != hover:
-		hover = t
-		queue_redraw()
+			if pending_id != "":
+				_cancel_place()
+			else:
+				_deselect()
 
 
 # ---------------------------------------------------------------- drawing
@@ -676,11 +758,8 @@ func _draw() -> void:
 			_outline(_tile_center(moving_from.x, moving_from.y), _wcol("hover_dim"))
 		var ok := _pending_error() == ""
 		_outline(_tile_center(pending_tile.x, pending_tile.y), _wcol("hover_ok") if ok else _wcol("hover_bad"))
-	elif _in_grid(hover):
-		var outline := _wcol("hover_neutral")
-		if selected == REMOVE:
-			outline = _wcol("hover_bad") if buildings.has(hover) else _wcol("hover_dim")
-		_outline(_tile_center(hover.x, hover.y), outline)
+	elif buildings.has(sel_tile):
+		_outline(_tile_center(sel_tile.x, sel_tile.y), _wcol("hover_neutral"))
 
 
 # ---------------------------------------------------------------- HUD
@@ -802,31 +881,46 @@ func _build_hud() -> void:
 	btn_confirm.pressed.connect(_confirm_place)
 	place_row.add_child(btn_confirm)
 
+	# action menu: floats under the selected building (hidden until a building is tapped)
+	var ab: Dictionary = tok["ui"]["actionbar"]
+	action_menu = PanelContainer.new()
+	action_menu.visible = false
+	action_menu.add_theme_stylebox_override("panel", _style(_ucol("panel_bottom")))
+	layer.add_child(action_menu)
+	var amr := HBoxContainer.new()
+	amr.add_theme_constant_override("separation", int(ab["gap"]))
+	action_menu.add_child(amr)
+	var side := int(ab["button"])
+	for a in [["info", _on_info_pressed], ["move", _on_move_pressed], ["upgrade", _on_upgrade_pressed], ["remove", _on_remove_pressed]]:
+		var mb := _icon_button(a[0], "button_normal", side)
+		mb.pressed.connect(a[1])
+		amr.add_child(mb)
+		if a[0] == "remove":
+			btn_remove = mb
+
 	var group := ButtonGroup.new()
 	group.allow_unpress = true
-	var ids: Array = def_order.duplicate()
-	ids.append(REMOVE)
-	for id in ids:
+	for id in def_order:
 		var b := Button.new()
 		b.toggle_mode = true
 		b.button_group = group
 		b.custom_minimum_size = Vector2(0, int(tok["ui"]["button"]["min_height"]))
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		if id == REMOVE:
-			b.text = Loc.t("ui.remove") + "\n" + Loc.t("ui.remove_sub")
-		else:
-			var d: Dictionary = defs[id]
-			b.text = Loc.t("building.%s.short" % id) + "\n" + _cost_text(d.get("cost", {}))
+		var d: Dictionary = defs[id]
+		b.text = Loc.t("building.%s.short" % id) + "\n" + _cost_text(d.get("cost", {}))
 		b.toggled.connect(_on_btn_toggled.bind(id))
 		hb.add_child(b)
 		btns[id] = b
 
 
-func _icon_button(icon_name: String, color_key: String) -> Button:
+func _icon_button(icon_name: String, color_key: String, side: int = 0) -> Button:
 	var ic: Dictionary = tok["ui"]["icon"]
 	var b := Button.new()
-	b.custom_minimum_size = Vector2(0, int(tok["ui"]["button"]["min_height"]))
-	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if side > 0:
+		b.custom_minimum_size = Vector2(side, side)
+	else:
+		b.custom_minimum_size = Vector2(0, int(tok["ui"]["button"]["min_height"]))
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	# Rasterized at 2x the display size, drawn down with mipmaps so it stays crisp on phones.
 	b.icon = Assets.load_svg(Assets.icon_path(icon_name), float(ic["display"]) * 2.0 / float(ic["canvas"]))
 	b.expand_icon = true
@@ -851,13 +945,7 @@ func _fit_hud() -> void:
 
 
 func _on_btn_toggled(on: bool, id: String) -> void:
-	if id == REMOVE:
-		if on:
-			selected = REMOVE
-		elif selected == REMOVE:
-			selected = ""
-	elif on:
-		selected = ""
+	if on:
 		_begin_place(id)
 	queue_redraw()
 
