@@ -45,6 +45,15 @@ var stock: Dictionary = {}       # kaynak id -> float
 var rates: Dictionary = {}       # resource id -> production per second
 var caps: Dictionary = {}        # resource id -> storage cap
 
+# Per-building state (keyed by tile like `buildings`): upgrade level and uncollected output.
+var levels: Dictionary = {}      # tile -> level (1 = default)
+var bucket: Dictionary = {}      # tile -> {resource: amount waiting to be collected}
+var bucket_seconds: float = 120.0
+var upg: Dictionary = {}         # default upgrade rules from buildings.json
+var age_up: Dictionary = {}
+var btn_upgrade: Button
+var collect_btn: Button
+
 # Selection: tapping a building selects it and shows an action menu under it.
 var sel_tile: Vector2i = Vector2i(-1, -1)
 var action_menu: PanelContainer
@@ -131,6 +140,9 @@ func _load_defs() -> bool:
 	grid_h = int(g.get("h", 14))
 	base_capacity = float(cfg.get("base_capacity", 50))
 	max_offline = float(cfg.get("max_offline_hours", 8)) * 3600.0
+	bucket_seconds = float(cfg.get("bucket_seconds", 120))
+	upg = cfg.get("upgrade", {})
+	age_up = cfg.get("age_up", {})
 	res_defs = cfg.get("resources", {})
 	start_stock = cfg.get("start", {})
 	for b in cfg.get("buildings", []):
@@ -193,16 +205,141 @@ func _recalc() -> void:
 		rates[r] = 0.0
 		caps[r] = base_capacity
 	for t in buildings:
-		var d: Dictionary = defs[buildings[t]]
-		var prod: Dictionary = d.get("produces", {})
-		for r in prod:
-			rates[r] = float(rates[r]) + float(prod[r])
-		var cap_add: float = float(d.get("capacity", 0))
+		var id: String = buildings[t]
+		for r in defs[id].get("produces", {}):
+			rates[r] = float(rates[r]) + _rate_at(id, _level(t), r)
+		var cap_add := _capacity_at(id, _level(t))
 		if cap_add > 0.0:
 			for r in res_defs:
 				caps[r] = float(caps[r]) + cap_add
 	for r in res_defs:
 		stock[r] = minf(float(stock[r]), float(caps[r]))
+
+
+# ---------------------------------------------------------------- levels (data-driven, buildings.json)
+
+## A building's own "upgrade" block overrides the global defaults.
+func _up(id: String, key: String) -> float:
+	return float(defs[id].get("upgrade", {}).get(key, upg.get(key, 1.0)))
+
+
+func _level(t: Vector2i) -> int:
+	return int(levels.get(t, 1))
+
+
+func _max_level(id: String) -> int:
+	return int(_up(id, "max_level"))
+
+
+func _rate_at(id: String, lv: int, r: String) -> float:
+	return float(defs[id].get("produces", {}).get(r, 0.0)) * pow(_up(id, "prod_growth"), lv - 1)
+
+
+func _capacity_at(id: String, lv: int) -> float:
+	return float(defs[id].get("capacity", 0)) * pow(_up(id, "capacity_growth"), lv - 1)
+
+
+## How much of one resource a building can hold before you collect it.
+func _bucket_cap_at(id: String, lv: int, r: String) -> float:
+	return float(defs[id].get("produces", {}).get(r, 0.0)) * bucket_seconds * pow(_up(id, "bucket_growth"), lv - 1)
+
+
+## Cost to go from level `lv` to `lv + 1`.
+func _upgrade_cost(id: String, lv: int) -> Dictionary:
+	var out := {}
+	var cost: Dictionary = defs[id].get("cost", {})
+	for r in cost:
+		out[r] = ceilf(float(cost[r]) * pow(_up(id, "cost_growth"), lv))
+	return out
+
+
+## Everything spent on a building so far (build + upgrades).
+func _invested(id: String, lv: int) -> Dictionary:
+	var out: Dictionary = defs[id].get("cost", {}).duplicate()
+	for l in range(1, lv):
+		var c := _upgrade_cost(id, l)
+		for r in c:
+			out[r] = float(out.get(r, 0.0)) + float(c[r])
+	return out
+
+
+func _best_level(id: String) -> int:
+	var best := 0
+	for t in buildings:
+		if buildings[t] == id:
+			best = maxi(best, _level(t))
+	return best
+
+
+## Age-up needs certain buildings at certain levels. Returns [{id, have, need}].
+func _age_progress() -> Array:
+	var out: Array = []
+	var req: Dictionary = age_up.get("requires", {})
+	for id in req:
+		out.append({"id": id, "have": _best_level(id), "need": int(req[id])})
+	return out
+
+
+func _age_ready() -> bool:
+	for e in _age_progress():
+		if int(e["have"]) < int(e["need"]):
+			return false
+	return not age_up.is_empty()
+
+
+func _bucket_total(t: Vector2i) -> float:
+	var n := 0.0
+	for r in bucket.get(t, {}):
+		n += float(bucket[t][r])
+	return n
+
+
+## Moves uncollected output into village storage (as much as fits). Returns what was taken.
+func _collect(t: Vector2i) -> Dictionary:
+	var got := {}
+	if not bucket.has(t):
+		return got
+	var b: Dictionary = bucket[t]
+	for r in b:
+		var take := minf(float(b[r]), float(caps[r]) - float(stock[r]))
+		take = floorf(take) if take < float(b[r]) else take
+		if take > 0.0:
+			stock[r] = float(stock[r]) + take
+			b[r] = float(b[r]) - take
+			got[r] = take
+	return got
+
+
+func _gains_text(got: Dictionary) -> String:
+	var parts: PackedStringArray = []
+	for r in got:
+		if float(got[r]) >= 1.0:
+			parts.append(Loc.t("toast.offline_part", {"n": int(float(got[r])), "res": _rname(r)}))
+	return Loc.t("info.join").join(parts)
+
+
+func _collect_and_report(tiles: Array) -> void:
+	var total := {}
+	var waiting := 0.0
+	for t in tiles:
+		var got := _collect(t)
+		for r in got:
+			total[r] = float(total.get(r, 0.0)) + float(got[r])
+		waiting += _bucket_total(t)
+	_update_hud()
+	queue_redraw()
+	var txt := _gains_text(total)
+	if txt != "":
+		_toast(Loc.t("toast.collected", {"gains": txt}))
+		_save_game()
+	elif waiting >= 1.0:
+		_toast(Loc.t("toast.storage_full"))
+	else:
+		_toast(Loc.t("toast.nothing_to_collect"))
+
+
+func _collect_all() -> void:
+	_collect_and_report(buildings.keys())
 
 
 func _rname(r: String) -> String:
@@ -254,14 +391,12 @@ func _check_place(t: Vector2i, id: String) -> String:
 func _process(delta: float) -> void:
 	if not ready_ok:
 		return
-	for r in rates:
-		var rate: float = rates[r]
-		if rate > 0.0:
-			stock[r] = minf(float(caps[r]), float(stock[r]) + rate * delta)
+	_produce(delta)
 	hud_timer += delta
 	if hud_timer >= 0.2:
 		hud_timer = 0.0
 		_update_hud()
+		queue_redraw()   # collect badges grow over time
 	save_timer += delta
 	if save_timer >= 5.0:
 		save_timer = 0.0
@@ -275,6 +410,19 @@ func _process(delta: float) -> void:
 		if remove_armed <= 0.0:
 			_disarm_remove()
 	_position_menu()
+
+
+func _produce(delta: float) -> void:
+	for t in buildings:
+		var id: String = buildings[t]
+		var prod: Dictionary = defs[id].get("produces", {})
+		if prod.is_empty():
+			continue
+		var b: Dictionary = bucket.get(t, {})
+		var lv := _level(t)
+		for r in prod:
+			b[r] = minf(_bucket_cap_at(id, lv, r), float(b.get(r, 0.0)) + _rate_at(id, lv, r) * delta)
+		bucket[t] = b
 
 
 func _tap(t: Vector2i) -> void:
@@ -296,6 +444,9 @@ func _select(t: Vector2i) -> void:
 	sel_tile = t
 	action_menu.visible = true
 	_position_menu()
+	var id: String = buildings[t]
+	_toast(Loc.t("info.selected", {"name": _bname(id), "lv": _level(t), "max": _max_level(id), "details": _details(id, _level(t))}))
+	_refresh_menu()
 	queue_redraw()
 
 
@@ -337,10 +488,34 @@ func _position_menu() -> void:
 	action_menu.position = pos
 
 
+func _refresh_menu() -> void:
+	if btn_upgrade == null or not buildings.has(sel_tile):
+		return
+	var id: String = buildings[sel_tile]
+	var lv := _level(sel_tile)
+	var ok := lv < _max_level(id) and _afford(_upgrade_cost(id, lv)) and _upgrade_blocker(id, lv) == ""
+	btn_upgrade.modulate = Color.WHITE if ok else _ucol("button_unaffordable_tint")
+
+
+## Empty = can upgrade (apart from cost). Non-hut buildings cannot pass the level of the building they require.
+func _upgrade_blocker(id: String, lv: int) -> String:
+	if lv >= _max_level(id):
+		return Loc.t("toast.max_level", {"name": _bname(id)})
+	var req: String = String(defs[id].get("requires", ""))
+	if req != "" and _best_level(req) < lv + 1:
+		return Loc.t("toast.upgrade_needs", {"name": _bname(req), "n": lv + 1})
+	return ""
+
+
 func _on_info_pressed() -> void:
-	if buildings.has(sel_tile):
-		var id: String = buildings[sel_tile]
-		_toast(Loc.t("info.line", {"name": _bname(id), "details": _details(id)}))
+	if not buildings.has(sel_tile):
+		return
+	var id: String = buildings[sel_tile]
+	var lv := _level(sel_tile)
+	if lv >= _max_level(id):
+		_toast(Loc.t("toast.max_level", {"name": _bname(id)}))
+	else:
+		_toast(Loc.t("info.next_level", {"lv": lv + 1, "details": _details(id, lv + 1), "cost": _cost_text(_upgrade_cost(id, lv))}))
 
 
 func _on_move_pressed() -> void:
@@ -351,7 +526,28 @@ func _on_move_pressed() -> void:
 
 
 func _on_upgrade_pressed() -> void:
-	_toast(Loc.t("toast.upgrade_soon"))
+	if not buildings.has(sel_tile):
+		return
+	var id: String = buildings[sel_tile]
+	var lv := _level(sel_tile)
+	var blocked := _upgrade_blocker(id, lv)
+	if blocked != "":
+		_toast(blocked)
+		return
+	var cost := _upgrade_cost(id, lv)
+	for r in cost:
+		if float(stock.get(r, 0.0)) < float(cost[r]):
+			_toast(Loc.t("toast.upgrade_cost", {"cost": _cost_text(cost)}))
+			return
+	for r in cost:
+		stock[r] = float(stock[r]) - float(cost[r])
+	levels[sel_tile] = lv + 1
+	_recalc()
+	_update_hud()
+	_save_game()
+	_toast(Loc.t("toast.upgraded", {"name": _bname(id), "lv": lv + 1}))
+	_refresh_menu()
+	queue_redraw()
 
 
 func _on_remove_pressed() -> void:
@@ -366,7 +562,7 @@ func _on_remove_pressed() -> void:
 	var red := _ucol("button_cancel")
 	btn_remove.add_theme_stylebox_override("normal", _button_style(red))
 	btn_remove.add_theme_stylebox_override("hover", _button_style(red))
-	_toast(Loc.t("toast.confirm_remove", {"name": _bname(buildings[sel_tile]), "refund": _cost_text(_refund_of(buildings[sel_tile]))}))
+	_toast(Loc.t("toast.confirm_remove", {"name": _bname(buildings[sel_tile]), "refund": _cost_text(_refund_of(buildings[sel_tile], _level(sel_tile)))}))
 
 
 func _place(t: Vector2i, id: String) -> void:
@@ -379,6 +575,8 @@ func _place(t: Vector2i, id: String) -> void:
 	for r in cost:
 		stock[r] = float(stock[r]) - float(cost[r])
 	buildings[t] = id
+	levels[t] = 1
+	bucket.erase(t)
 	_recalc()
 	_update_hud()
 	_save_game()
@@ -388,34 +586,37 @@ func _place(t: Vector2i, id: String) -> void:
 func _remove_at(t: Vector2i) -> void:
 	if not buildings.has(t):
 		return
-	var buildings_id_removed: String = buildings[t]
-	var d: Dictionary = defs[buildings_id_removed]
-	var cost: Dictionary = d.get("cost", {})
-	for r in cost:
-		stock[r] = float(stock[r]) + floorf(float(cost[r]) * 0.5)
+	var id: String = buildings[t]
+	_collect(t)   # whatever fits in storage is kept; the rest is lost with the building
+	var refund := _refund_of(id, _level(t))
+	for r in refund:
+		stock[r] = float(stock[r]) + float(refund[r])
 	buildings.erase(t)
+	levels.erase(t)
+	bucket.erase(t)
 	_recalc()
 	_update_hud()
 	_save_game()
-	_toast(Loc.t("toast.removed", {"name": _bname(buildings_id_removed), "refund": _cost_text(_refund_of(buildings_id_removed))}))
+	_toast(Loc.t("toast.removed", {"name": _bname(id), "refund": _cost_text(refund)}))
 
 
-## Half of the build cost, rounded down: what demolishing gives back.
-func _refund_of(id: String) -> Dictionary:
+## Half of everything spent on the building (build + upgrades), rounded down.
+func _refund_of(id: String, lv: int = 1) -> Dictionary:
 	var out := {}
-	var cost: Dictionary = defs[id].get("cost", {})
-	for r in cost:
-		out[r] = floorf(float(cost[r]) * 0.5)
+	var spent := _invested(id, lv)
+	for r in spent:
+		out[r] = floorf(float(spent[r]) * 0.5)
 	return out
 
 
-func _details(id: String) -> String:
+func _details(id: String, lv: int = 1) -> String:
 	var d: Dictionary = defs[id]
 	var parts: PackedStringArray = []
 	var prod: Dictionary = d.get("produces", {})
 	for r in prod:
-		parts.append(Loc.t("info.produces", {"rate": "%.1f" % float(prod[r]), "res": _rname(r)}))
-	var cap_add: float = float(d.get("capacity", 0))
+		parts.append(Loc.t("info.produces", {"rate": "%.1f" % _rate_at(id, lv, r), "res": _rname(r)}))
+		parts.append(Loc.t("info.holds", {"n": int(_bucket_cap_at(id, lv, r))}))
+	var cap_add := _capacity_at(id, lv)
 	if cap_add > 0.0:
 		parts.append(Loc.t("info.storage", {"n": int(cap_add)}))
 	return Loc.t("info.join").join(parts)
@@ -511,6 +712,11 @@ func _confirm_place() -> void:
 		if t != from:
 			buildings.erase(from)
 			buildings[t] = id
+			levels[t] = _level(from)
+			levels.erase(from)
+			if bucket.has(from):
+				bucket[t] = bucket[from]
+				bucket.erase(from)
 			_save_game()
 			_toast(Loc.t("toast.moved", {"name": _bname(id)}))
 	else:
@@ -590,6 +796,8 @@ func _on_ghost(world: Vector2) -> bool:
 func _reset_game() -> void:
 	_end_place()
 	buildings.clear()
+	levels.clear()
+	bucket.clear()
 	for r in res_defs:
 		stock[r] = float(start_stock.get(r, 0))
 	_deselect()
@@ -689,7 +897,12 @@ func _unhandled_input(event: InputEvent) -> void:
 							grab_offset = pending_tile - _world_to_tile(w)
 			else:
 				if dragging and drag_moved < TAP_SLOP and not ghost_dragged:
-					_tap(_pick_tile(get_canvas_transform().affine_inverse() * mb.position))
+					var w := get_canvas_transform().affine_inverse() * mb.position
+					var bt := _badge_at(w) if pending_id == "" else Vector2i(-1, -1)
+					if bt.x >= 0:
+						_collect_and_report([bt])
+					else:
+						_tap(_pick_tile(w))
 				dragging = false
 				ghost_grab = false
 	elif event is InputEventMouseMotion:
@@ -736,6 +949,57 @@ func _draw_building(c: Vector2, id: String, alpha: float = 1.0) -> void:
 	draw_texture_rect(tex, Rect2(c - sprite_anchor, sprite_canvas), false, Color(1, 1, 1, alpha))
 
 
+func _badge_centre(t: Vector2i) -> Vector2:
+	return _tile_center(t.x, t.y) + Vector2(0, -float(tok["ui"]["badge"]["lift"]))
+
+
+## The building whose collect badge is under the pointer, or (-1, -1).
+func _badge_at(world: Vector2) -> Vector2i:
+	var rad := float(tok["ui"]["badge"]["radius"]) + 6.0
+	var xf := get_canvas_transform()
+	var p := xf * world
+	var best := Vector2i(-1, -1)
+	var best_d := INF
+	for t in buildings:
+		if _bucket_total(t) < 1.0 or t == moving_from:
+			continue
+		var d := p.distance_to(xf * _badge_centre(t))
+		if d <= rad and d < best_d:
+			best = t
+			best_d = d
+	return best
+
+
+## Collect badges and level marks: drawn after the tiles (never hidden) and at a constant size on screen.
+func _draw_marks() -> void:
+	var bd: Dictionary = tok["ui"]["badge"]
+	var z := cam.zoom.x
+	var font := ThemeDB.fallback_font
+	var rad := float(bd["radius"])
+	var fs := int(bd["font"])
+	for t in buildings:
+		if t == moving_from:
+			continue
+		var id: String = buildings[t]
+		var c := _tile_center(t.x, t.y)
+		if _level(t) >= 2:
+			draw_set_transform(c + Vector2(TW * 0.30, 6), 0.0, Vector2(1, 1) / z)
+			var lt := Loc.t("ui.level_mark", {"n": _level(t)})
+			var lfs := int(bd["level_font"])
+			draw_string_outline(font, Vector2.ZERO, lt, HORIZONTAL_ALIGNMENT_LEFT, -1, lfs, 6, Color(0, 0, 0, 0.8))
+			draw_string(font, Vector2.ZERO, lt, HORIZONTAL_ALIGNMENT_LEFT, -1, lfs, _ucol("text"))
+		var tot := _bucket_total(t)
+		if tot >= 1.0:
+			var prod: Dictionary = defs[id].get("produces", {})
+			var res := String(prod.keys()[0]) if prod.size() > 0 else "stone"
+			var full := tot >= _bucket_cap_at(id, _level(t), res) - 0.01
+			draw_set_transform(_badge_centre(t), 0.0, Vector2(1, 1) / z)
+			draw_circle(Vector2.ZERO, rad, _ucol("panel_bottom"))
+			draw_arc(Vector2.ZERO, rad - 2.0, 0.0, TAU, 28, _ucol("resource_" + res), float(bd["ring"]) * (1.6 if full else 1.0))
+			draw_string(font, Vector2(-rad, fs * 0.35), str(int(tot)), HORIZONTAL_ALIGNMENT_CENTER, rad * 2.0, fs, _ucol("text"))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
 func _draw() -> void:
 	if not ready_ok and defs.is_empty():
 		return
@@ -762,6 +1026,7 @@ func _draw() -> void:
 			if pending_id != "" and t == pending_tile:
 				_draw_building(c, pending_id, float(tok["ui"]["world"]["ghost_alpha"]))
 
+	_draw_marks()
 	if pending_id != "":
 		if moving_from.x >= 0 and moving_from != pending_tile:
 			_outline(_tile_center(moving_from.x, moving_from.y), _wcol("hover_dim"))
@@ -839,6 +1104,11 @@ func _build_hud() -> void:
 		l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		row.add_child(l)
 		res_labels[r] = l
+	collect_btn = Button.new()
+	collect_btn.text = Loc.t("ui.collect_all")
+	collect_btn.add_theme_font_size_override("font_size", int(tok["ui"]["font_size"]["small"]))
+	collect_btn.pressed.connect(_collect_all)
+	row.add_child(collect_btn)
 	reset_btn = Button.new()
 	reset_btn.text = Loc.t("ui.reset")
 	reset_btn.add_theme_font_size_override("font_size", int(tok["ui"]["font_size"]["small"]))
@@ -906,6 +1176,8 @@ func _build_hud() -> void:
 		amr.add_child(mb)
 		if a[0] == "remove":
 			btn_remove = mb
+		elif a[0] == "upgrade":
+			btn_upgrade = mb
 
 	var group := ButtonGroup.new()
 	group.allow_unpress = true
@@ -987,6 +1259,7 @@ func _update_hud() -> void:
 		var ok: bool = _afford(d.get("cost", {})) and not locked
 		b.modulate = Color.WHITE if ok else _ucol("button_unaffordable_tint")
 	_refresh_place_ui()
+	_refresh_menu()
 
 
 ## Show text on the info line and keep it there (no fade) while a ghost is being placed.
@@ -1029,7 +1302,7 @@ func _save_game() -> void:
 		return
 	var b: Array = []
 	for t in buildings:
-		b.append([t.x, t.y, buildings[t]])
+		b.append([t.x, t.y, buildings[t], _level(t), bucket.get(t, {})])
 	var data := {
 		"v": 1,
 		"t": Time.get_unix_time_from_system(),
@@ -1050,10 +1323,21 @@ func _load_game() -> void:
 		return
 	var data: Dictionary = parsed
 	buildings.clear()
+	levels.clear()
+	bucket.clear()
 	for e in data.get("b", []):
 		var id := String(e[2])
 		if defs.has(id):
-			buildings[Vector2i(int(e[0]), int(e[1]))] = id
+			var tile := Vector2i(int(e[0]), int(e[1]))
+			buildings[tile] = id
+			if e.size() >= 4:
+				levels[tile] = clampi(int(e[3]), 1, _max_level(id))
+			if e.size() >= 5 and typeof(e[4]) == TYPE_DICTIONARY:
+				var bk := {}
+				for r in e[4]:
+					if res_defs.has(r):
+						bk[r] = minf(float(e[4][r]), _bucket_cap_at(id, _level(tile), r))
+				bucket[tile] = bk
 	var st: Dictionary = data.get("stock", {})
 	for r in res_defs:
 		if st.has(r):
@@ -1063,14 +1347,20 @@ func _load_game() -> void:
 		cam.position = Vector2(float(cp[0]), float(cp[1]))
 		_set_zoom(float(cp[2]))
 	_recalc()
-	# Offline accumulation (GDD: a plot stores at most ~8 hours of production)
+	# Offline accumulation: buildings keep producing into their own stores (up to their capacity)
 	var dt := clampf(Time.get_unix_time_from_system() - float(data.get("t", 0)), 0.0, max_offline)
 	if dt > 30.0:
-		var gained: PackedStringArray = []
-		for r in res_defs:
-			var add := minf(float(caps[r]) - float(stock[r]), float(rates[r]) * dt)
-			if add >= 1.0:
-				stock[r] = float(stock[r]) + add
-				gained.append(Loc.t("toast.offline_part", {"n": int(add), "res": _rname(r)}))
-		if gained.size() > 0:
-			_toast(Loc.t("toast.offline", {"gains": Loc.t("info.join").join(gained)}))
+		var made := {}
+		for t in buildings:
+			var id: String = buildings[t]
+			var b: Dictionary = bucket.get(t, {})
+			for r in defs[id].get("produces", {}):
+				var cur := float(b.get(r, 0.0))
+				var add := minf(_bucket_cap_at(id, _level(t), r) - cur, _rate_at(id, _level(t), r) * dt)
+				if add > 0.0:
+					b[r] = cur + add
+					made[r] = float(made.get(r, 0.0)) + add
+			bucket[t] = b
+		var txt := _gains_text(made)
+		if txt != "":
+			_toast(Loc.t("toast.offline", {"gains": txt}))

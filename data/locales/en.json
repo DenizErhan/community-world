@@ -14,6 +14,8 @@
 
   "ui.reset": "Reset",
   "ui.reset_confirm": "Sure?",
+  "ui.collect_all": "Collect",
+  "ui.level_mark": "Lv {n}",
   "ui.res_line": "{name} {cur}/{cap}",
   "ui.rate": "+{rate}/s",
   "ui.no_rate": "-",
@@ -23,7 +25,9 @@
   "info.produces": "+{rate} {res}/s",
   "info.storage": "storage +{n}",
   "info.join": ", ",
-  "info.line": "{name}: {details}",
+  "info.holds": "holds {n}",
+  "info.selected": "{name}, level {lv}/{max}: {details}",
+  "info.next_level": "Level {lv}: {details}. Upgrade costs {cost}.",
 
   "place.new": "Place {name}: drag it, tap a tile or use the arrows.",
   "place.move": "Moving {name} ({details}).",
@@ -34,10 +38,16 @@
   "toast.need_building": "Build a {name} first.",
   "toast.not_enough": "Not enough {res}.",
   "toast.built": "{name} built.",
-  "toast.upgrade_soon": "Upgrades are not available yet.",
+  "toast.upgraded": "{name} upgraded to level {lv}.",
+  "toast.upgrade_cost": "Upgrade costs {cost}.",
+  "toast.upgrade_needs": "Upgrade your {name} to level {n} first.",
+  "toast.max_level": "{name} is at the highest level.",
+  "toast.collected": "Collected: {gains}",
+  "toast.storage_full": "Storage is full. Spend some resources or upgrade the Hut.",
+  "toast.nothing_to_collect": "Nothing to collect yet.",
   "toast.confirm_remove": "Tap the bin again to remove {name}. You get back 50%: {refund}.",
   "toast.removed": "{name} removed. 50% refunded: {refund}.",
   "toast.reset_done": "Village reset.",
-  "toast.offline": "While you were away: {gains}",
+  "toast.offline": "While you were away your buildings made: {gains}. Tap the badges to collect.",
   "toast.offline_part": "+{n} {res}"
 }

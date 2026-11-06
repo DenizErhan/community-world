@@ -16,7 +16,9 @@ A collaborative village-building game: mobile, isometric 2.5D, 50-player servers
 | Place a building | Pick it at the bottom. A ghost appears on the map: drag it, tap a tile, or nudge it with the four arrows, then tap the green tick (the red cross cancels) | Same, click; `Enter` confirms, `Esc` cancels |
 | Select a building | Tap it: a menu appears under it (Info, Move, Upgrade, Remove). Tap empty ground to close it | Same |
 | Move a building | Select it, tap **Move**, move the ghost the same way, tick to confirm (free); cross puts it back | Same |
-| Remove | Select it, tap the bin twice (refunds 50%). Upgrade is a placeholder for now | Same |
+| Collect | Producing buildings fill up on their own (about 2 minutes of output, more at higher levels). Tap the round badge over a building to collect it, or **Collect** (top bar) for all. Storage that is full leaves the rest in the building | Same |
+| Upgrade | Select a building, tap **Upgrade** (up to level 3): more output, bigger store; the Hut gives more village storage. A building cannot pass the level of the Hut. **Info** shows what the next level gives and costs | Same |
+| Remove | Select it, tap the bin twice (refunds 50% of everything spent, upgrades included) | Same |
 | Pan | Drag the map (a drag that starts on the ghost moves the ghost instead) | Drag |
 | Zoom | Two fingers | Mouse wheel |
 

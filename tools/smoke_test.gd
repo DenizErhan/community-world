@@ -87,9 +87,18 @@ func _initialize() -> void:
 	print("Production and storage")
 	var before: float = main.stock["stone"]
 	main._process(10.0)
-	check(absf(float(main.stock["stone"]) - before - 5.0) < 0.5, "quarry produced +5 stone in 10 s")
+	check(float(main.stock["stone"]) == before, "production does not go straight into storage")
+	check(absf(float(main.bucket[Vector2i(7, 6)]["stone"]) - 5.0) < 0.01, "quarry holds +5 stone after 10 s")
+	main._collect_and_report([Vector2i(7, 6)])
+	check(absf(float(main.stock["stone"]) - before - 5.0) < 0.5, "collecting moves +5 stone into storage")
+	check(main._bucket_total(Vector2i(7, 6)) < 0.01, "the building is empty after collecting")
 	main._process(100000.0)
-	check(float(main.stock["stone"]) <= float(main.caps["stone"]) + 0.001, "stock never exceeds the cap")
+	var cap_b: float = main._bucket_cap_at("quarry", 1, "stone")
+	check(absf(float(main.bucket[Vector2i(7, 6)]["stone"]) - cap_b) < 0.01 and cap_b == 60.0, "a building stops producing when its store is full (120 s of output)")
+	main.stock["stone"] = 40.0
+	main._collect_all()
+	check(float(main.stock["stone"]) <= float(main.caps["stone"]) + 0.001, "storage never exceeds the cap")
+	check(float(main.stock["stone"]) >= float(main.caps["stone"]) - 1.0 and main._bucket_total(Vector2i(7, 6)) > 0.0, "what does not fit stays in the building")
 	check(float(main.caps["stone"]) == 75.0, "hut raised storage 50 -> 75")
 
 	print("Tapping a building")
@@ -155,6 +164,50 @@ func _initialize() -> void:
 	check(main._refund_of("quarry")["stone"] == 6.0, "refund is half the cost, e.g. 6 of the quarry's 12 stone")
 	main._on_remove_pressed()
 	check(not main.buildings.has(Vector2i(9, 9)) and main.sel_tile == Vector2i(-1, -1), "second Remove tap demolishes the quarry")
+
+	print("Upgrades")
+	main.buildings[Vector2i(3, 3)] = "hut"
+	main.buildings[Vector2i(4, 3)] = "farm"
+	main.levels[Vector2i(3, 3)] = 1
+	main.levels[Vector2i(4, 3)] = 1
+	main._recalc()
+	main.stock["stone"] = 70.0
+	main._tap(Vector2i(4, 3))
+	main._on_upgrade_pressed()
+	check(main._level(Vector2i(4, 3)) == 1, "a building cannot pass the level of the hut it needs")
+	check(main._upgrade_cost("hut", 1)["stone"] == 18.0, "hut level 2 costs 18 stone (10 x 1.8)")
+	main._tap(Vector2i(3, 3))
+	main._on_upgrade_pressed()
+	check(main._level(Vector2i(3, 3)) == 2 and absf(float(main.stock["stone"]) - 52.0) < 0.01, "upgrading the hut costs 18 stone and raises its level")
+	check(float(main.caps["stone"]) == 50.0 + 25.0 + 50.0, "hut level 2 doubles its storage bonus (25 -> 50)")
+	main._tap(Vector2i(4, 3))
+	main._on_upgrade_pressed()
+	check(main._level(Vector2i(4, 3)) == 2, "farm can now reach level 2")
+	check(absf(main._rate_at("farm", 2, "food") - 0.6) < 0.001 and absf(float(main.rates["food"]) - 0.6) < 0.001, "farm level 2 produces 1.5x")
+	check(main._bucket_cap_at("farm", 2, "food") > main._bucket_cap_at("farm", 1, "food"), "a higher level holds more output")
+	main.stock["stone"] = 70.0
+	main._tap(Vector2i(3, 3))
+	main._on_upgrade_pressed()
+	main.stock["stone"] = 70.0
+	main._on_upgrade_pressed()
+	check(main._level(Vector2i(3, 3)) == 3, "hut stops at the maximum level")
+	main.stock["stone"] = 0.0
+	main._tap(Vector2i(4, 3))
+	main._on_upgrade_pressed()
+	check(main._level(Vector2i(4, 3)) == 2, "upgrade needs the resources")
+	main.stock["stone"] = 70.0
+	main._on_upgrade_pressed()
+	check(main._level(Vector2i(4, 3)) == 3, "farm reaches level 3")
+	var refund: Dictionary = main._refund_of("farm", 3)
+	check(float(refund["stone"]) == floorf((15.0 + 27.0 + 49.0) * 0.5), "removing refunds half of everything invested, upgrades included")
+	main._save_game()
+	var main3: Node2D = (load("res://main.tscn") as PackedScene).instantiate()
+	root.add_child(main3)
+	await process_frame
+	check(main3._level(Vector2i(3, 3)) == 3 and main3._level(Vector2i(4, 3)) == 3, "levels are saved and restored")
+	main3.queue_free()
+	check(not main._age_ready(), "age-up is not ready until the required levels are reached")
+	check(main._age_progress().size() == 4, "age-up lists its four requirements")
 
 	print("Design system")
 	var tokens_ok: bool = main.tok.has("ages") and main.tok["ages"].has(main.age)

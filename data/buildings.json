@@ -8,6 +8,23 @@
   },
   "base_capacity": 50,
   "max_offline_hours": 8,
+  "bucket_seconds": 120,
+  "upgrade": {
+    "max_level": 3,
+    "cost_growth": 1.8,
+    "prod_growth": 1.5,
+    "capacity_growth": 2.0,
+    "bucket_growth": 1.6
+  },
+  "age_up": {
+    "next": "iron",
+    "requires": {
+      "hut": 2,
+      "farm": 2,
+      "well": 2,
+      "quarry": 2
+    }
+  },
   "start": {
     "food": 10,
     "water": 10,
