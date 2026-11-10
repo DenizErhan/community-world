@@ -53,3 +53,10 @@ Edit `design/tokens.json`, run `python3 tools/gen_assets.py`, commit the regener
 - Production flows straight into storage (the "collect" loop from the design doc comes next).
 - Only the Stone Age is playable; the Iron and Middle Ages art already exists.
 - No server yet. Ads and in-app purchases do not run on web; they are tested with an APK.
+
+## Animation
+
+Small looping effects live in `fx.gd` and are described in `design/tokens.json` under `motion`
+(chimney smoke, swaying crops, shimmering well water, quarry dust, butterflies, plus one-shot effects
+for placing, upgrading and collecting). Set `motion.enabled` to `false` to switch them off; the web
+build also turns them off when the browser asks for reduced motion.

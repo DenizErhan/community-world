@@ -42,7 +42,11 @@ jobs:
         run: python3 tools/gen_assets.py --check
 
       - name: Smoke test
-        run: ./godot --headless --script res://tools/smoke_test.gd
+        run: |
+          ./godot --headless --script res://tools/smoke_test.gd 2>&1 | tee smoke.log
+          test "${PIPESTATUS[0]}" -eq 0
+          # script errors in the game code (e.g. in drawing) do not change the exit code, so look for them
+          ! grep -q "SCRIPT ERROR" smoke.log
 
       - name: Web export
         run: |

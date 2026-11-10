@@ -209,6 +209,24 @@ func _initialize() -> void:
 	check(not main._age_ready(), "age-up is not ready until the required levels are reached")
 	check(main._age_progress().size() == 4, "age-up lists its four requirements")
 
+	print("Animation")
+	var loops: Dictionary = main.tok["motion"]["loops"]
+	for id in main.def_order:
+		check(loops.has(id) and (loops[id] as Array).size() > 0, "%s has an animation loop in the design tokens" % id)
+	check(main.fx != null and main.fx.enabled, "the animation layer is on")
+	var fx_before: int = main.fx.event_count()
+	main.fx.burst_dust(Vector2i(6, 6))
+	main.fx.sparkle(Vector2i(6, 6))
+	main.fx.float_text(main._badge_centre(Vector2i(6, 6)), "+5", Color.WHITE)
+	check(main.fx.event_count() == fx_before + 3, "one-shot effects are queued")
+	for i in 5:
+		main.fx.queue_redraw()
+		await process_frame      # lets fx._draw run: loops, butterflies and events (errors would print)
+	main.fx.enabled = false
+	main.fx._process(0.1)
+	check(main.fx.event_count() == 0, "turning animation off clears running effects")
+	main.fx.enabled = true
+
 	print("Design system")
 	var tokens_ok: bool = main.tok.has("ages") and main.tok["ages"].has(main.age)
 	check(tokens_ok, "tokens loaded and the current age has a palette")

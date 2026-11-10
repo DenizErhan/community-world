@@ -71,6 +71,7 @@ var ghost_dragged: bool = false
 var grab_offset: Vector2i = Vector2i.ZERO
 var cam: Camera2D
 var ready_ok: bool = false
+var fx: Node2D                    # animation layer (fx.gd), drawn above the world
 
 # input state
 var touches: Dictionary = {}
@@ -109,6 +110,9 @@ func _ready() -> void:
 	cam.position = _tile_center(grid_w * 0.5 - 0.5, grid_h * 0.5 - 0.5) + Vector2(0, 60)
 	cam.zoom = Vector2(START_ZOOM, START_ZOOM)
 	cam.make_current()
+	fx = preload("res://fx.gd").new()
+	add_child(fx)
+	fx.setup(self)
 	_build_hud()
 	_recalc()
 	_load_game()
@@ -325,6 +329,8 @@ func _collect_and_report(tiles: Array) -> void:
 		var got := _collect(t)
 		for r in got:
 			total[r] = float(total.get(r, 0.0)) + float(got[r])
+			if float(got[r]) >= 1.0:
+				fx.float_text(_badge_centre(t), "+%d" % int(float(got[r])), _ucol("resource_" + String(r)))
 		waiting += _bucket_total(t)
 	_update_hud()
 	queue_redraw()
@@ -545,6 +551,7 @@ func _on_upgrade_pressed() -> void:
 	_recalc()
 	_update_hud()
 	_save_game()
+	fx.sparkle(sel_tile)
 	_toast(Loc.t("toast.upgraded", {"name": _bname(id), "lv": lv + 1}))
 	_refresh_menu()
 	queue_redraw()
@@ -577,6 +584,7 @@ func _place(t: Vector2i, id: String) -> void:
 	buildings[t] = id
 	levels[t] = 1
 	bucket.erase(t)
+	fx.burst_dust(t)
 	_recalc()
 	_update_hud()
 	_save_game()
@@ -591,6 +599,7 @@ func _remove_at(t: Vector2i) -> void:
 	var refund := _refund_of(id, _level(t))
 	for r in refund:
 		stock[r] = float(stock[r]) + float(refund[r])
+	fx.burst_dust(t)
 	buildings.erase(t)
 	levels.erase(t)
 	bucket.erase(t)
@@ -717,6 +726,7 @@ func _confirm_place() -> void:
 			if bucket.has(from):
 				bucket[t] = bucket[from]
 				bucket.erase(from)
+			fx.burst_dust(t)
 			_save_game()
 			_toast(Loc.t("toast.moved", {"name": _bname(id)}))
 	else:
